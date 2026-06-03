@@ -258,7 +258,7 @@ function App() {
   const [toastKey,      setToastKey]      = useState(0)
   const [presence,      setPresence]      = useState(37)
   const [trackFading,   setTrackFading]   = useState(false)
-  const [hudPinned,     setHudPinned]     = useState(false)
+  const [hudPinned,     setHudPinned]     = useState(() => window.innerWidth <= 760)
 
   const activeTrack = tracks[currentTrack]
 
@@ -1038,7 +1038,7 @@ function App() {
         className={`hud-toggle-btn ${hudPinned ? 'is-active' : ''}`}
         aria-label={hudPinned ? 'Cerrar panel de controles' : 'Abrir panel de controles'}
         data-tooltip={hudPinned ? 'Cerrar panel' : 'Abrir controles'}
-        onClick={() => setHudPinned((v) => !v)}
+        onClick={() => { if (hudPinned) setHudVisible(false); setHudPinned((v) => !v) }}
       >
         {hudPinned ? <IconClose/> : <IconMusic/>}
       </button>
