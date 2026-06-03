@@ -418,7 +418,7 @@ function App() {
         sourceRef.current = audioCtxRef.current.createMediaElementSource(audioRef.current)
         analyserRef.current = audioCtxRef.current.createAnalyser()
         analyserRef.current.fftSize               = 1024   // ↓ de 2048: respuesta más ágil
-        analyserRef.current.smoothingTimeConstant  = 0.70   // bajos decaen con gracia, no se quedan pegados
+        analyserRef.current.smoothingTimeConstant  = 0.62   // ↓ de 0.75: barras más reactivas al beat
         sourceRef.current.connect(analyserRef.current)
         analyserRef.current.connect(audioCtxRef.current.destination)
       }
@@ -527,20 +527,9 @@ function App() {
       if (freqData) {
         const freq   = Math.pow(10, logMin + (i / BARS) * (logMax - logMin))
         const binIdx = Math.max(0, Math.min(freqData.length - 1, Math.round(freq / nyq * freqData.length)))
-        const raw    = freqData[binIdx] / 255
-
-        /* Curva de potencia por zona — elimina la saturación de bajos:
-           pow(x, 0.78) comprime los picos: raw=1.0→0.78, raw=0.8→0.83
-           Bajos tienen techo propio al 82% para que siempre haya dinamismo visible */
-        if (i < 14) {
-          strength = Math.max(0.03, Math.min(0.82, Math.pow(raw, 0.78)))
-        } else if (i < 38) {
-          strength = Math.max(0.03, Math.pow(raw, 0.88))
-        } else if (i > 58) {
-          strength = Math.max(0.03, Math.min(0.96, Math.pow(raw, 0.72)))
-        } else {
-          strength = Math.max(0.03, raw)
-        }
+        strength = Math.max(0.03, freqData[binIdx] / 255)
+        if (i < 14) strength = Math.min(1, strength * 1.55)   // punch en bajos
+        if (i > 58) strength = Math.min(1, strength * 1.2)    // presencia en agudos
       } else {
         const wave  = Math.sin(time + i * 0.32) * 0.5 + 0.5
         const noise = Math.sin(time * 0.75 + i * 1.25) * 0.5 + 0.5

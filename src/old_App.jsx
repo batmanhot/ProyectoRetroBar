@@ -417,8 +417,8 @@ function App() {
       if (!sourceRef.current) {
         sourceRef.current = audioCtxRef.current.createMediaElementSource(audioRef.current)
         analyserRef.current = audioCtxRef.current.createAnalyser()
-        analyserRef.current.fftSize               = 1024   // ↓ de 2048: respuesta más ágil
-        analyserRef.current.smoothingTimeConstant  = 0.70   // bajos decaen con gracia, no se quedan pegados
+        analyserRef.current.fftSize                = 2048
+        analyserRef.current.smoothingTimeConstant  = 0.75
         sourceRef.current.connect(analyserRef.current)
         analyserRef.current.connect(audioCtxRef.current.destination)
       }
@@ -429,8 +429,7 @@ function App() {
   }, [])
 
   /* ══════════════════════════════
-     VISUALIZADOR CANVAS — Bar Social Edition
-     Barras desde el suelo · paleta fiesta · peak dots · reflejo · kick flash
+     VISUALIZADOR CANVAS (real + fallback sintético)
      Lee isPlayingRef (no el state) para evitar el closure stale del loop rAF.
   ══════════════════════════════ */
   const drawVisualizer = useCallback(() => {
@@ -441,174 +440,59 @@ function App() {
     const dpr = window.devicePixelRatio || 1
     const w   = canvas.clientWidth  * dpr
     const h   = canvas.clientHeight * dpr
-    if (canvas.width !== w || canvas.height !== h) {
-      canvas.width  = w
-      canvas.height = h
-      /* Inicializar peak dots cuando cambia el tamaño */
-      peakDataRef.current = null
-    }
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h }
     ctx.clearRect(0, 0, w, h)
 
     const playing = isPlayingRef.current
-    const BARS    = 72                        // más barras → más densidad de fiesta
-    const GAP     = Math.max(1, w * 0.004)   // separación proporcional al canvas
-    const barW    = w / BARS
-    const bW      = barW - GAP               // ancho neto de cada barra
-    const FLOOR   = h - 2                    // línea de suelo (2 px de margen)
-    const MAX_H   = FLOOR * 0.72             // techo al 72% — el título siempre visible
+    const bars    = 64
+    const centerY = h / 2
+    const barW    = w / bars
 
-    /* ── Inicializar arrays de peaks y velocidades ── */
-    if (!peakDataRef.current || peakDataRef.current.peaks.length !== BARS) {
-      peakDataRef.current = {
-        peaks: new Float32Array(BARS).fill(0),
-        vel:   new Float32Array(BARS).fill(0),
-      }
-    }
-    const { peaks, vel } = peakDataRef.current
-
-    /* ── Leer datos de frecuencia ── */
     let freqData = null
     if (analyserRef.current && playing) {
       freqData = new Uint8Array(analyserRef.current.frequencyBinCount)
       analyserRef.current.getByteFrequencyData(freqData)
     }
 
-    visualTimeRef.current += playing ? 0.038 : 0.012
+    visualTimeRef.current += playing ? 0.04 : 0.015
     const time = visualTimeRef.current
 
-    /* ── Mapeo logarítmico 30 Hz → 16 kHz ── */
+    /* Mapeo logarítmico precalculado — igual distribución en todo el ancho */
     const nyq    = audioCtxRef.current ? audioCtxRef.current.sampleRate / 2 : 22050
     const logMin = Math.log10(30)
     const logMax = Math.log10(16000)
 
-    /* ── Paleta fiesta: 6 zonas de color cálidas→frías ── */
-    const partyColor = (t, alpha) => {
-      // t: 0=izq(bajos) … 1=der(agudos)
-      // Zona 0–0.18 → naranja cálido
-      // Zona 0.18–0.36 → amarillo limón
-      // Zona 0.36–0.54 → verde neón
-      // Zona 0.54–0.70 → cyan eléctrico
-      // Zona 0.70–0.84 → magenta
-      // Zona 0.84–1.0  → violeta
-      let r, g, b
-      if (t < 0.18)      { const f=t/0.18;           r=255; g=Math.round(110+f*100); b=Math.round(f*30) }
-      else if (t < 0.36) { const f=(t-0.18)/0.18;    r=Math.round(255-f*55); g=255; b=Math.round(30+f*20) }
-      else if (t < 0.54) { const f=(t-0.36)/0.18;    r=Math.round(200-f*190); g=255; b=Math.round(50+f*155) }
-      else if (t < 0.70) { const f=(t-0.54)/0.16;    r=Math.round(10+f*40); g=Math.round(255-f*100); b=255 }
-      else if (t < 0.84) { const f=(t-0.70)/0.14;    r=Math.round(50+f*205); g=Math.round(155-f*125); b=255 }
-      else               { const f=(t-0.84)/0.16;    r=Math.round(255-f*50); g=Math.round(30-f*20); b=Math.round(255-f*30) }
-      return `rgba(${r},${g},${b},${alpha})`
-    }
-
-    /* ── Detectar kick (energía de graves) para flash ── */
-    let bassEnergy = 0
-    if (freqData) {
-      for (let i = 0; i < 8; i++) bassEnergy += freqData[i]
-      bassEnergy /= (8 * 255)
-    }
-    const kickFlash = bassEnergy > 0.78
-
-    /* ── Flash de kick: halo radial en la base ── */
-    if (kickFlash) {
-      const cx = w / 2
-      const rad = w * 0.45
-      const glow = ctx.createRadialGradient(cx, FLOOR, 0, cx, FLOOR, rad)
-      glow.addColorStop(0,   'rgba(255,160,30,0.18)')
-      glow.addColorStop(0.4, 'rgba(255,80,0,0.08)')
-      glow.addColorStop(1,   'rgba(255,80,0,0)')
-      ctx.fillStyle = glow
-      ctx.fillRect(0, FLOOR - rad, w, rad)
-    }
-
-    /* ── Dibujar barras ── */
-    for (let i = 0; i < BARS; i++) {
+    for (let i = 0; i < bars; i++) {
       let strength
 
       if (freqData) {
-        const freq   = Math.pow(10, logMin + (i / BARS) * (logMax - logMin))
+        /* Log mapping: 30 Hz (izq) → 16 kHz (der), igual que el oído humano */
+        const freq   = Math.pow(10, logMin + (i / bars) * (logMax - logMin))
         const binIdx = Math.max(0, Math.min(freqData.length - 1, Math.round(freq / nyq * freqData.length)))
-        const raw    = freqData[binIdx] / 255
-
-        /* Curva de potencia por zona — elimina la saturación de bajos:
-           pow(x, 0.78) comprime los picos: raw=1.0→0.78, raw=0.8→0.83
-           Bajos tienen techo propio al 82% para que siempre haya dinamismo visible */
-        if (i < 14) {
-          strength = Math.max(0.03, Math.min(0.82, Math.pow(raw, 0.78)))
-        } else if (i < 38) {
-          strength = Math.max(0.03, Math.pow(raw, 0.88))
-        } else if (i > 58) {
-          strength = Math.max(0.03, Math.min(0.96, Math.pow(raw, 0.72)))
-        } else {
-          strength = Math.max(0.03, raw)
-        }
+        strength = Math.max(0.04, freqData[binIdx] / 255)
+        if (i < 15) strength = Math.min(1, strength * 1.5)   // punch en graves
       } else {
-        const wave  = Math.sin(time + i * 0.32) * 0.5 + 0.5
-        const noise = Math.sin(time * 0.75 + i * 1.25) * 0.5 + 0.5
-        strength    = Math.max(0.03, (wave * 0.6 + noise * 0.4) * (playing ? 0.65 : 0.18))
+        const wave  = Math.sin(time + i * 0.35) * 0.5 + 0.5
+        const noise = Math.sin(time * 0.8 + i * 1.3) * 0.5 + 0.5
+        strength    = Math.max(0.04, (wave * 0.65 + noise * 0.35) * (playing ? 0.7 : 0.2))
       }
 
-      const barH = Math.min(MAX_H, Math.max(4, strength * MAX_H))
-      const x    = i * barW + GAP / 2
-      const y    = FLOOR - barH
-      const t    = i / BARS
+      const barH = Math.max(6, strength * h * 0.88)
+      const x    = i * barW
 
-      /* ── Peak dot: física de gravedad ── */
-      if (barH > peaks[i]) {
-        peaks[i] = barH
-        vel[i]   = 0
-      } else {
-        vel[i]   += 0.55                    // gravedad
-        peaks[i] = Math.max(0, peaks[i] - vel[i])
-      }
+      /* Color: cyan → verde-cian (centro) → magenta */
+      const t    = i / bars
+      const mid  = Math.sin(t * Math.PI)  // pico en t=0.5
+      const r    = Math.round(5   + t * 250)
+      const g    = Math.round(238 - t * 130 + mid * 50)
+      const b    = Math.round(255 - t * 60  - mid * 50)
+      const hue  = `${r}, ${g}, ${b}`
 
-      /* ── Gradiente vertical de la barra: brillante arriba, denso abajo ── */
-      const grad = ctx.createLinearGradient(x, y, x, FLOOR)
-      grad.addColorStop(0,   partyColor(t, 0.95 + strength * 0.05))
-      grad.addColorStop(0.5, partyColor(t, 0.75))
-      grad.addColorStop(1,   partyColor(t, 0.45))
-
-      ctx.shadowBlur  = 14 + strength * 28
-      ctx.shadowColor = partyColor(t, 0.9)
-      ctx.fillStyle   = grad
-      ctx.beginPath()
-      ctx.roundRect(x, y, bW, barH, [2, 2, 0, 0])
-      ctx.fill()
-
-      /* ── Brillo en la cima de la barra ── */
-      ctx.shadowBlur = 0
-      ctx.fillStyle  = partyColor(t, 0.55 + strength * 0.4)
-      ctx.fillRect(x, y, bW, Math.min(3, barH))
-
-      /* ── Reflejo especular en el suelo (profundidad de escenario) ── */
-      ctx.shadowBlur = 0
-      const refH  = Math.min(barH * 0.28, MAX_H * 0.18)
-      const refGr = ctx.createLinearGradient(x, FLOOR, x, FLOOR + refH)
-      refGr.addColorStop(0,   partyColor(t, 0.22))
-      refGr.addColorStop(1,   partyColor(t, 0))
-      ctx.fillStyle = refGr
-      ctx.fillRect(x, FLOOR, bW, refH)
-
-      /* ── Peak dot con color de su zona ── */
-      if (peaks[i] > 6) {
-        const py = FLOOR - peaks[i] - 2
-        ctx.shadowBlur  = 8
-        ctx.shadowColor = partyColor(t, 1)
-        ctx.fillStyle   = partyColor(t, 0.9)
-        ctx.fillRect(x, py, bW, 2)
-        ctx.shadowBlur  = 0
-      }
+      ctx.fillStyle   = `rgba(${hue}, ${0.35 + strength * 0.65})`
+      ctx.shadowBlur  = 22 + strength * 42
+      ctx.shadowColor = `rgba(${hue}, 0.95)`
+      ctx.fillRect(x, centerY - barH / 2, barW * 0.55, barH)
     }
-
-    /* ── Línea de suelo con glow ── */
-    ctx.shadowBlur = 0
-    const floorGrad = ctx.createLinearGradient(0, 0, w, 0)
-    floorGrad.addColorStop(0,    'rgba(255,120,20,0.6)')
-    floorGrad.addColorStop(0.25, 'rgba(80,255,120,0.6)')
-    floorGrad.addColorStop(0.5,  'rgba(5,238,255,0.6)')
-    floorGrad.addColorStop(0.75, 'rgba(255,43,214,0.6)')
-    floorGrad.addColorStop(1,    'rgba(160,80,255,0.6)')
-    ctx.fillStyle = floorGrad
-    ctx.fillRect(0, FLOOR, w, 1.5)
 
     rafRef.current = window.requestAnimationFrame(drawVisualizer)
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -797,7 +681,7 @@ function App() {
     if (configOpen) return
     setHudVisible(true)
     window.clearTimeout(hideHudRef.current)
-    hideHudRef.current = window.setTimeout(() => setHudVisible(false), 3200)
+    hideHudRef.current = window.setTimeout(() => setHudVisible(false), 4200)
   }
 
   /* ── Config modal ── */
@@ -1037,7 +921,6 @@ function App() {
         type="button"
         className={`hud-toggle-btn ${hudPinned ? 'is-active' : ''}`}
         aria-label={hudPinned ? 'Cerrar panel de controles' : 'Abrir panel de controles'}
-        data-tooltip={hudPinned ? 'Cerrar panel' : 'Abrir controles'}
         onClick={() => setHudPinned((v) => !v)}
       >
         {hudPinned ? <IconClose/> : <IconMusic/>}
