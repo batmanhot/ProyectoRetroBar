@@ -176,8 +176,6 @@ function Toast({ message }) {
   const DURATION  = 4200
 
   useEffect(() => {
-    setVisible(true)
-    setProgress(100)
     startRef.current = performance.now()
 
     const tick = (now) => {
@@ -336,11 +334,14 @@ function App() {
   ══════════════════════════════ */
   useEffect(() => {
     return () => {
+      // The audio element is mounted for the whole App lifetime; cleanup runs on unmount.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      const ambientAudio = ambientAudioRef.current
       window.clearTimeout(hideHudRef.current)
       window.clearTimeout(fxTimerRef.current)
       window.cancelAnimationFrame(rafRef.current)
       tracksRef.current.forEach((t) => URL.revokeObjectURL(t.url))
-      if (ambientAudioRef.current) { ambientAudioRef.current.pause(); ambientAudioRef.current.src = '' }
+      if (ambientAudio) { ambientAudio.pause(); ambientAudio.src = '' }
       fxPoolRef.current.forEach((a) => { a.pause(); a.src = '' })
       fxPoolRef.current = []
       if (audioCtxRef.current) audioCtxRef.current.close()
@@ -367,43 +368,6 @@ function App() {
     document.addEventListener('fullscreenchange', onFsChange)
     return () => document.removeEventListener('fullscreenchange', onFsChange)
   }, [])
-
-  /* ══════════════════════════════
-     ATAJOS DE TECLADO
-  ══════════════════════════════ */
-  useEffect(() => {
-    const onKey = (e) => {
-      const tag = document.activeElement?.tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
-
-      switch (e.code) {
-        case 'Space':
-          e.preventDefault()
-          togglePlayback()
-          break
-        case 'ArrowRight':
-          e.preventDefault()
-          nextTrack()
-          break
-        case 'ArrowLeft':
-          e.preventDefault()
-          prevTrack()
-          break
-        case 'KeyM':
-          setMusicVolume((v) => v > 0 ? 0 : 0.82)
-          showToast(musicVolume > 0 ? 'Música silenciada' : 'Música restaurada')
-          break
-        case 'KeyF':
-          toggleFullscreen()
-          break
-        default:
-          break
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPlaying, tracks, currentTrack, shuffleMode, repeatMode, musicVolume])
 
   /* ══════════════════════════════
      WEB AUDIO API — ANALYSER
@@ -433,7 +397,7 @@ function App() {
      Barras desde el suelo · paleta fiesta · peak dots · reflejo · kick flash
      Lee isPlayingRef (no el state) para evitar el closure stale del loop rAF.
   ══════════════════════════════ */
-  const drawVisualizer = useCallback(() => {
+  const drawVisualizer = useCallback(function drawVisualizerFrame() {
     const canvas = canvasRef.current
     if (!canvas) return
 
@@ -610,8 +574,7 @@ function App() {
     ctx.fillStyle = floorGrad
     ctx.fillRect(0, FLOOR, w, 1.5)
 
-    rafRef.current = window.requestAnimationFrame(drawVisualizer)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    rafRef.current = window.requestAnimationFrame(drawVisualizerFrame)
   }, [])
 
   /* ══════════════════════════════
@@ -642,11 +605,11 @@ function App() {
     showToast('Efecto de ambiente activado')
   }
 
-  const scheduleFx = useCallback(() => {
+  const scheduleFx = useCallback(function scheduleNextFx() {
     window.clearTimeout(fxTimerRef.current)
     fxTimerRef.current = window.setTimeout(() => {
       if (isPlaying) playRandomRoomFx()
-      scheduleFx()
+      scheduleNextFx()
     }, 18000 + randomUnit() * 12000)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPlaying, audioConfig, fxVolume])
@@ -818,7 +781,7 @@ function App() {
   }
 
   /* ── Fullscreen ── */
-  const toggleFullscreen = async () => {
+  const toggleFullscreen = useCallback(async () => {
     try {
       if (!document.fullscreenElement) {
         await document.documentElement.requestFullscreen()
@@ -828,7 +791,7 @@ function App() {
         showToast('Pantalla completa desactivada')
       }
     } catch { showToast('Pantalla completa no disponible') }
-  }
+  }, [showToast])
 
   /* ── Ciclo de repeatMode ── */
   const cycleRepeat = () => {
@@ -837,6 +800,42 @@ function App() {
     const labels = { none: 'Repetición desactivada', all: 'Repetir toda la lista', one: 'Repetir esta pista' }
     showToast(labels[next])
   }
+
+  /* ══════════════════════════════
+     ATAJOS DE TECLADO
+  ══════════════════════════════ */
+  useEffect(() => {
+    const onKey = (e) => {
+      const tag = document.activeElement?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+
+      switch (e.code) {
+        case 'Space':
+          e.preventDefault()
+          togglePlayback()
+          break
+        case 'ArrowRight':
+          e.preventDefault()
+          nextTrack()
+          break
+        case 'ArrowLeft':
+          e.preventDefault()
+          prevTrack()
+          break
+        case 'KeyM':
+          setMusicVolume((v) => v > 0 ? 0 : 0.82)
+          showToast(musicVolume > 0 ? 'Música silenciada' : 'Música restaurada')
+          break
+        case 'KeyF':
+          toggleFullscreen()
+          break
+        default:
+          break
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [togglePlayback, nextTrack, prevTrack, setMusicVolume, showToast, musicVolume, toggleFullscreen])
 
   /* ══════════════════════════════════════════════════════════════════════════
      RENDER
